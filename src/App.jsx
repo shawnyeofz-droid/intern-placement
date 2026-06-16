@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { Search, Check, Copy, X, Upload, ChevronDown, ChevronRight, Trash2, RefreshCw, Lock } from "lucide-react";
 
 // === Set this, and set the SAME value as ROSTER_TOKEN in Vercel env vars ===
-const PASSCODE = "CMDINTERN2026";
+const PASSCODE = "SDMGDT888";
 
 const PERIODS = {
   "Period 1": "Period 1 - 2 Mar - 22 May 2026",
