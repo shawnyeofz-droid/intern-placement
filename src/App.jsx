@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Search, Check, Copy, X, Save, Upload, ChevronDown, ChevronRight, Trash2, RefreshCw, Lock } from "lucide-react";
+import { Search, Check, Copy, X, Upload, ChevronDown, ChevronRight, Trash2, RefreshCw, Lock } from "lucide-react";
 
 // === Set this, and set the SAME value as ROSTER_TOKEN in Vercel env vars ===
 const PASSCODE = "CMDINTERN2026";
@@ -11,6 +11,7 @@ const PERIODS = {
   "Period 4": "Period 4 - 23 Nov 2026 - 12 Feb 2027",
 };
 const STORE_KEY = "roster:v1";
+const STEPS = ["Students", "Company", "Review", "Email"];
 
 function ordinal(n) {
   const v = n % 100;
@@ -93,6 +94,7 @@ export default function App() {
   const [importNote, setImportNote] = useState("");
   const dropRef = useRef(null);
 
+  const [step, setStep] = useState(0);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState([]);
   const [contact, setContact] = useState("");
@@ -106,20 +108,13 @@ export default function App() {
     let got = false;
     try {
       const r = await fetch(`/api/roster?token=${encodeURIComponent(tok)}`);
-      if (r.ok) {
-        const data = await r.json();
-        if (Array.isArray(data) && data.length) { setRoster(data); got = true; }
-      }
+      if (r.ok) { const data = await r.json(); if (Array.isArray(data) && data.length) { setRoster(data); got = true; } }
     } catch (e) {}
     if (!got) {
-      try {
-        const res = await window.storage.get(STORE_KEY);
-        if (res && res.value) setRoster(JSON.parse(res.value));
-      } catch (e) {}
+      try { const res = await window.storage.get(STORE_KEY); if (res && res.value) setRoster(JSON.parse(res.value)); } catch (e) {}
     }
     setLoaded(true);
   }
-
   useEffect(() => { if (unlocked) loadRoster(token); }, [unlocked]);
   useEffect(() => { if (loaded && roster.length === 0) setShowImport(true); }, [loaded]);
 
@@ -127,12 +122,10 @@ export default function App() {
     if (codeInput.trim() === PASSCODE) { setToken(codeInput.trim()); setAuthError(""); setUnlocked(true); }
     else setAuthError("Incorrect passcode.");
   }
-
   async function persist(next) {
     setRoster(next);
     try { await window.storage.set(STORE_KEY, JSON.stringify(next)); } catch (e) {}
   }
-
   async function syncFromSheets() {
     setImportNote("Syncing from Google Sheets...");
     try {
@@ -142,20 +135,18 @@ export default function App() {
       if (!Array.isArray(data) || !data.length) throw new Error("no rows");
       await persist(data);
       const noLink = data.filter(s => !s.showreel || !s.resume).length;
-      setImportNote(`Synced ${data.length} students from Sheets. ${noLink ? noLink + " missing a showreel/resume link." : "All links captured."}`);
+      setImportNote(`Synced ${data.length} students. ${noLink ? noLink + " missing a showreel/resume link." : "All links captured."}`);
       setShowImport(false);
     } catch (e) {
       setImportNote("Live sync runs on the deployed version (not in this preview). Paste below instead.");
     }
   }
-
   function handlePaste(e) {
     e.preventDefault();
     const html = e.clipboardData.getData("text/html");
     const text = e.clipboardData.getData("text/plain");
-    const rows = html ? parseHtmlTable(html) : parseTsv(text);
-    const parsed = rows ? buildRoster(rows) : [];
-    if (!parsed.length) { setImportNote("Could not read any rows. Copy the student rows from the sheet (including the header) and paste again."); return; }
+    const parsed = (html ? parseHtmlTable(html) : parseTsv(text)) ? buildRoster(html ? parseHtmlTable(html) : parseTsv(text)) : [];
+    if (!parsed.length) { setImportNote("Could not read any rows. Copy the student rows (including the header) and paste again."); return; }
     let next;
     if (append) {
       const byKey = Object.fromEntries(roster.map(s => [keyOf(s), s]));
@@ -168,10 +159,7 @@ export default function App() {
     if (dropRef.current) dropRef.current.innerHTML = "";
     setShowImport(false);
   }
-
-  function updateStudent(key, field, val) {
-    persist(roster.map(s => keyOf(s) === key ? { ...s, [field]: val } : s));
-  }
+  function updateStudent(key, field, val) { persist(roster.map(s => keyOf(s) === key ? { ...s, [field]: val } : s)); }
   function clearAll() { if (confirm("Clear the whole roster?")) { persist([]); setSelected([]); } }
 
   const filtered = useMemo(() => {
@@ -188,7 +176,7 @@ export default function App() {
   const greeting = contact.trim() || "[Contact]";
 
   function linkCell(label, url) {
-    return url ? `<a href="${esc(url)}" style="color:#1155cc;">${label}</a>` : `<span style="color:#b00;">${label} (link missing)</span>`;
+    return url ? `<a href="${esc(url)}" style="color:#0d9488;">${label}</a>` : `<span style="color:#b00;">${label} (link missing)</span>`;
   }
   function buildHtml() {
     const trs = rows.map(s => `
@@ -243,153 +231,204 @@ Senior Lecturer | School of Design and Media`;
     setTimeout(() => setCopied(""), 1800);
   }
   const missingLinks = rows.some(s => !s.portfolio || !s.showreel || !s.resume);
+  const inputCls = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-teal-500";
+  const labelCls = "block text-xs uppercase tracking-wide text-slate-400 font-medium mb-1";
 
   if (!unlocked) {
     return (
-      <div className="min-h-[420px] flex items-center justify-center p-6">
-        <div className="w-full max-w-sm border rounded-xl p-6 text-center">
-          <div className="mx-auto w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center mb-3"><Lock size={18} className="text-slate-500"/></div>
-          <h1 className="font-bold text-lg">Intern Placement Generator</h1>
-          <p className="text-slate-500 text-sm mt-1 mb-4">Enter the passcode to continue.</p>
+      <div className="min-h-screen bg-teal-50 flex items-center justify-center p-6">
+        <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center">
+          <div className="mx-auto w-12 h-12 rounded-full bg-teal-50 flex items-center justify-center mb-4"><Lock size={20} className="text-teal-600"/></div>
+          <h1 className="font-semibold text-lg text-slate-800">Intern Placement</h1>
+          <p className="text-slate-400 text-sm mt-1 mb-5">Enter the passcode to continue.</p>
           <input type="password" value={codeInput} autoFocus
             onChange={e => setCodeInput(e.target.value)}
             onKeyDown={e => e.key === "Enter" && submitCode()}
-            placeholder="Passcode"
-            className="w-full border rounded px-3 py-2 text-center mb-2" />
-          {authError && <p className="text-red-600 text-xs mb-2">{authError}</p>}
-          <button onClick={submitCode} className="w-full bg-blue-600 text-white rounded px-3 py-2 hover:bg-blue-700">Unlock</button>
-          <p className="text-[11px] text-slate-400 mt-3">For NYP internship allocation use only. Contains student contact details.</p>
+            placeholder="Passcode" className={inputCls + " text-center mb-2"} />
+          {authError && <p className="text-red-500 text-xs mb-2">{authError}</p>}
+          <button onClick={submitCode} className="w-full bg-teal-600 text-white rounded-full px-4 py-2.5 text-sm font-medium hover:bg-teal-700 mt-1">Unlock</button>
+          <p className="text-xs text-slate-400 mt-4">For NYP internship allocation. Contains student contact details.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-5xl mx-auto p-5 text-sm text-slate-800">
-      <div className="flex items-center justify-between mb-1">
-        <h1 className="text-xl font-bold">Intern Placement Email Generator</h1>
-        <span className="text-xs text-slate-400">{roster.length} students loaded</span>
-      </div>
-      <p className="text-slate-500 mb-4">Your sheet is the source of truth. Sync or import once per cohort, then generate emails.</p>
+    <div className="min-h-screen bg-teal-50 py-8 px-4">
+      <div className="max-w-4xl mx-auto">
+        <div className="flex items-center justify-between mb-4 px-1">
+          <div>
+            <h1 className="text-lg font-semibold text-slate-800">Intern Placement</h1>
+            <p className="text-xs text-slate-400">{roster.length} students loaded</p>
+          </div>
+          <button onClick={() => setShowImport(v => !v)} className="flex items-center gap-1.5 text-sm text-teal-700 border border-teal-200 bg-white rounded-full px-4 py-2 hover:bg-teal-50">
+            <Upload size={15}/> Manage roster {showImport ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
+          </button>
+        </div>
 
-      <div className="border rounded-lg mb-4">
-        <button onClick={() => setShowImport(v => !v)} className="w-full flex items-center justify-between px-3 py-2 font-medium">
-          <span className="flex items-center gap-2"><Upload size={16}/> Import / refresh roster</span>
-          {showImport ? <ChevronDown size={16}/> : <ChevronRight size={16}/>}
-        </button>
         {showImport && (
-          <div className="px-3 pb-3 space-y-2">
-            <button onClick={syncFromSheets} className="flex items-center gap-1 text-xs bg-blue-600 text-white rounded px-3 py-1.5 hover:bg-blue-700"><RefreshCw size={13}/> Sync from Google Sheets</button>
-            <p className="text-[11px] text-slate-400">Live sync runs on the deployed version. In this preview, use paste below.</p>
-            <ol className="text-xs text-slate-600 list-decimal ml-4 space-y-0.5">
-              <li>In the CMD_2024 Motion or Comms sheet, select the rows (include the header row with Name, Admin, Behance, Showreel, Resume).</li>
-              <li>Copy, then click the box below and paste. Hyperlink URLs come through automatically.</li>
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 mb-4 space-y-3">
+            <button onClick={syncFromSheets} className="flex items-center gap-1.5 text-sm bg-teal-600 text-white rounded-full px-4 py-2 hover:bg-teal-700"><RefreshCw size={14}/> Sync from Google Sheets</button>
+            <p className="text-xs text-slate-400">Live sync runs on the deployed version. In this preview, paste below.</p>
+            <ol className="text-xs text-slate-500 list-decimal ml-4 space-y-1">
+              <li>In the Motion or Comms sheet, select the rows including the header (Name, Admin, Behance, Showreel, Resume).</li>
+              <li>Copy, click the box below, and paste. Hyperlink URLs come through automatically.</li>
             </ol>
-            <label className="flex items-center gap-2 text-xs">
+            <label className="flex items-center gap-2 text-xs text-slate-600">
               <input type="checkbox" checked={append} onChange={e => setAppend(e.target.checked)} />
-              Add to existing roster (tick this when pasting the second sheet)
+              Add to existing roster (tick when pasting the second sheet)
             </label>
             <div ref={dropRef} contentEditable suppressContentEditableWarning onPaste={handlePaste}
-              className="min-h-[64px] border-2 border-dashed rounded p-3 text-slate-400 focus:outline-blue-400 focus:border-blue-400">Paste sheet rows here</div>
-            {importNote && <p className="text-xs text-slate-700">{importNote}</p>}
-            {roster.length > 0 && (
-              <button onClick={clearAll} className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700"><Trash2 size={13}/> Clear roster</button>
-            )}
+              style={{ minHeight: "64px" }}
+              className="border-2 border-dashed border-slate-200 rounded-lg p-3 text-sm text-slate-400 focus:outline-none focus:border-teal-400">Paste sheet rows here</div>
+            {importNote && <p className="text-xs text-slate-600">{importNote}</p>}
+            {roster.length > 0 && <button onClick={clearAll} className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700"><Trash2 size={13}/> Clear roster</button>}
           </div>
         )}
-      </div>
 
-      {roster.length === 0 ? (
-        <div className="text-center text-slate-400 py-10 border rounded-lg">No roster yet. Open “Import / refresh roster” above.</div>
-      ) : (
-      <>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="border rounded-lg p-3">
-            <div className="flex items-center gap-2 mb-2">
-              <Search size={16} className="text-slate-400" />
-              <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name or admin no." className="w-full outline-none border-b py-1" />
-            </div>
-            <div className="h-64 overflow-y-auto pr-1">
-              {filtered.map(r => {
-                const k = keyOf(r), on = selected.includes(k);
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row overflow-hidden">
+          {/* Stepper */}
+          <div className="md:w-56 shrink-0 bg-slate-50 p-6 border-b md:border-b-0 md:border-r border-slate-100">
+            <div className="flex md:flex-col gap-1">
+              {STEPS.map((s, i) => {
+                const done = i < step, active = i === step;
                 return (
-                  <button key={k} onClick={() => toggle(k)} className={`w-full text-left px-2 py-1.5 rounded flex items-center justify-between mb-0.5 ${on ? "bg-blue-50" : "hover:bg-slate-50"}`}>
-                    <span><span className="font-medium">{r.name}</span><span className="text-slate-400 ml-2 text-xs">{r.admin}</span></span>
-                    {on && <Check size={15} className="text-blue-600 shrink-0" />}
-                  </button>
+                  <div key={s} className="flex md:items-start items-center gap-3 flex-1 md:flex-none">
+                    <div className="flex md:flex-col items-center">
+                      <button onClick={() => setStep(i)}
+                        className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium shrink-0 ${active ? "bg-teal-600 text-white" : done ? "bg-teal-600 text-white" : "bg-slate-200 text-slate-500"}`}>
+                        {done ? <Check size={14}/> : i + 1}
+                      </button>
+                      {i < STEPS.length - 1 && <div className={`hidden md:block w-px h-7 my-1 ${done ? "bg-teal-500" : "bg-slate-200"}`} />}
+                    </div>
+                    <button onClick={() => setStep(i)} className={`text-sm md:pt-1 text-left ${active ? "text-slate-800 font-medium" : done ? "text-slate-600" : "text-slate-400"}`}>{s}</button>
+                  </div>
                 );
               })}
             </div>
           </div>
-          <div className="border rounded-lg p-3 space-y-3">
-            <div>
-              <label className="block text-xs text-slate-500 mb-0.5">Company</label>
-              <input value={company} onChange={e => setCompany(e.target.value)} placeholder="e.g. Rewind Networks" className="w-full border rounded px-2 py-1" />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-0.5">Contact name (greeting)</label>
-              <input value={contact} onChange={e => setContact(e.target.value)} placeholder="e.g. Kif" className="w-full border rounded px-2 py-1" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-slate-500 mb-0.5">Period</label>
-                <select value={period} onChange={e => setPeriod(e.target.value)} className="w-full border rounded px-2 py-1">
-                  {Object.keys(PERIODS).map(p => <option key={p}>{p}</option>)}
-                </select>
+
+          {/* Content */}
+          <div className="flex-1 p-6 flex flex-col" style={{ minHeight: "440px" }}>
+            {roster.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center text-center text-slate-400 text-sm">
+                No roster yet. Click <span className="text-teal-700 font-medium mx-1">Manage roster</span> above to sync or paste your cohort.
               </div>
-              <div>
-                <label className="block text-xs text-slate-500 mb-0.5">Confirm-by date</label>
-                <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} className="w-full border rounded px-2 py-1" />
-              </div>
-            </div>
-            <label className="flex items-center gap-2 text-xs text-slate-600">
-              <input type="checkbox" checked={includeLabel} onChange={e => setIncludeLabel(e.target.checked)} />
-              Include "Official (Closed) and Sensitive-Normal" line
-            </label>
-            {company && <div className="text-xs text-slate-500 border-t pt-2">Suggested subject: <span className="text-slate-700">CMD Internship Placement – {company} – {period}</span></div>}
+            ) : (
+              <>
+                {step === 0 && (
+                  <div>
+                    <p className={labelCls}>Step 1</p>
+                    <h2 className="text-lg font-semibold text-slate-800 mb-3">Select student/s</h2>
+                    <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 mb-3">
+                      <Search size={16} className="text-slate-400" />
+                      <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name or admin no." className="w-full outline-none text-sm" />
+                    </div>
+                    <div className="h-64 overflow-y-auto pr-1 -mr-1">
+                      {filtered.map(r => {
+                        const k = keyOf(r), on = selected.includes(k);
+                        return (
+                          <button key={k} onClick={() => toggle(k)}
+                            className={`w-full text-left px-3 py-2 rounded-lg flex items-center justify-between mb-1 border ${on ? "bg-teal-50 border-teal-200" : "border-transparent hover:bg-slate-50"}`}>
+                            <span className="text-sm"><span className="font-medium text-slate-700">{r.name}</span><span className="text-slate-400 ml-2 text-xs">{r.admin}</span></span>
+                            {on && <Check size={15} className="text-teal-600 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-slate-400 mt-3">{selected.length} selected</p>
+                  </div>
+                )}
+
+                {step === 1 && (
+                  <div>
+                    <p className={labelCls}>Step 2</p>
+                    <h2 className="text-lg font-semibold text-slate-800 mb-4">Company details</h2>
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label className={labelCls}>Company</label><input value={company} onChange={e => setCompany(e.target.value)} placeholder="e.g. Rewind Networks" className={inputCls} /></div>
+                        <div><label className={labelCls}>Contact name</label><input value={contact} onChange={e => setContact(e.target.value)} placeholder="e.g. Kif" className={inputCls} /></div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label className={labelCls}>Period</label>
+                          <select value={period} onChange={e => setPeriod(e.target.value)} className={inputCls}>{Object.keys(PERIODS).map(p => <option key={p}>{p}</option>)}</select>
+                        </div>
+                        <div><label className={labelCls}>Confirm-by date</label><input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} className={inputCls} /></div>
+                      </div>
+                      <label className="flex items-center gap-2 text-sm text-slate-600">
+                        <input type="checkbox" checked={includeLabel} onChange={e => setIncludeLabel(e.target.checked)} />
+                        Include "Official (Closed) and Sensitive-Normal" line
+                      </label>
+                      {company && <div className="text-xs text-slate-400 border-t border-slate-100 pt-3">Suggested subject: <span className="text-slate-600">CMD Internship Placement – {company} – {period}</span></div>}
+                    </div>
+                  </div>
+                )}
+
+                {step === 2 && (
+                  <div>
+                    <p className={labelCls}>Step 3</p>
+                    <h2 className="text-lg font-semibold text-slate-800 mb-4">Review details</h2>
+                    {rows.length === 0 ? (
+                      <p className="text-sm text-slate-400">No students selected. Go back to step 1.</p>
+                    ) : (
+                      <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+                        {rows.map(s => {
+                          const k = keyOf(s);
+                          return (
+                            <div key={k} className="border border-slate-150 rounded-xl p-4">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="font-medium text-slate-700 text-sm">{s.name} <span className="text-slate-400 text-xs">{s.admin}</span></div>
+                                <button onClick={() => toggle(k)} className="text-slate-300 hover:text-red-500"><X size={16}/></button>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                <Field label="Mobile" val={s.mobile} on={v => updateStudent(k,"mobile",v)} />
+                                <Field label="Email" val={s.email} on={v => updateStudent(k,"email",v)} />
+                                <Field label="Portfolio URL" val={s.portfolio} on={v => updateStudent(k,"portfolio",v)} warn={!s.portfolio} />
+                                <Field label="Showreel URL" val={s.showreel} on={v => updateStudent(k,"showreel",v)} warn={!s.showreel} />
+                                <Field label="Resume URL" val={s.resume} on={v => updateStudent(k,"resume",v)} warn={!s.resume} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {step === 3 && (
+                  <div>
+                    <p className={labelCls}>Step 4</p>
+                    <h2 className="text-lg font-semibold text-slate-800 mb-3">Email</h2>
+                    {rows.length === 0 ? (
+                      <p className="text-sm text-slate-400">No students selected. Go back to step 1.</p>
+                    ) : (
+                      <>
+                        {missingLinks && <p className="text-xs text-red-500 mb-2">Some links are missing. Add them in step 3, or fix the Sheet and re-sync.</p>}
+                        <div className="border border-slate-150 rounded-xl p-4 bg-slate-50 max-h-96 overflow-y-auto" dangerouslySetInnerHTML={{ __html: buildHtml() }} />
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Nav */}
+                <div className="mt-auto pt-6 flex items-center justify-between">
+                  <button onClick={() => setStep(s => Math.max(0, s - 1))} disabled={step === 0}
+                    className={`text-sm px-5 py-2.5 rounded-full ${step === 0 ? "text-slate-300" : "text-slate-600 hover:bg-slate-100"}`}>Back</button>
+                  {step < 3 ? (
+                    <button onClick={() => setStep(s => Math.min(3, s + 1))} disabled={step === 0 && selected.length === 0}
+                      className={`text-sm font-medium px-6 py-2.5 rounded-full ${step === 0 && selected.length === 0 ? "bg-slate-200 text-slate-400" : "bg-teal-600 text-white hover:bg-teal-700"}`}>Next</button>
+                  ) : (
+                    <div className="flex gap-2">
+                      <button onClick={copyPlain} className="text-sm border border-slate-200 rounded-full px-4 py-2.5 hover:bg-slate-50 flex items-center gap-1"><Copy size={14}/> {copied==="plain"?"Copied":"Plain text"}</button>
+                      <button onClick={copyRich} className="text-sm font-medium bg-teal-600 text-white rounded-full px-5 py-2.5 hover:bg-teal-700 flex items-center gap-1"><Copy size={14}/> {copied==="rich"?"Copied":"Copy for Outlook"}</button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
-
-        {rows.length > 0 && (
-          <div className="mt-4 space-y-3">
-            <h2 className="font-semibold">Selected student/s ({rows.length})</h2>
-            {rows.map(s => {
-              const k = keyOf(s);
-              return (
-                <div key={k} className="border rounded-lg p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="font-medium">{s.name} <span className="text-slate-400 text-xs">{s.admin}</span></div>
-                    <button onClick={() => toggle(k)} className="text-slate-400 hover:text-red-500"><X size={16}/></button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    <Field label="Mobile" val={s.mobile} on={v => updateStudent(k,"mobile",v)} />
-                    <Field label="Email" val={s.email} on={v => updateStudent(k,"email",v)} />
-                    <Field label="Portfolio URL" val={s.portfolio} on={v => updateStudent(k,"portfolio",v)} warn={!s.portfolio} />
-                    <Field label="Showreel URL" val={s.showreel} on={v => updateStudent(k,"showreel",v)} warn={!s.showreel} />
-                    <Field label="Resume URL" val={s.resume} on={v => updateStudent(k,"resume",v)} warn={!s.resume} />
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-1">Edits apply to this session. For lasting fixes, update the Sheet.</p>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {rows.length > 0 && (
-          <div className="mt-4 border rounded-lg p-3">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="font-semibold">Email preview</h2>
-              <div className="flex gap-2">
-                <button onClick={copyRich} className="flex items-center gap-1 bg-blue-600 text-white rounded px-3 py-1.5 hover:bg-blue-700"><Copy size={14}/> {copied==="rich"?"Copied":"Copy for Outlook"}</button>
-                <button onClick={copyPlain} className="flex items-center gap-1 border rounded px-3 py-1.5 hover:bg-slate-50"><Copy size={14}/> {copied==="plain"?"Copied":"Plain text"}</button>
-              </div>
-            </div>
-            {missingLinks && <p className="text-xs text-red-600 mb-2">Some links are missing. Paste them into the fields above, or fix the hyperlink in the Sheet and re-sync.</p>}
-            <div className="bg-slate-50 border rounded p-3" dangerouslySetInnerHTML={{ __html: buildHtml() }} />
-          </div>
-        )}
-      </>
-      )}
+      </div>
     </div>
   );
 }
@@ -397,8 +436,9 @@ Senior Lecturer | School of Design and Media`;
 function Field({ label, val, on, warn }) {
   return (
     <div>
-      <label className="block text-xs text-slate-500 mb-0.5">{label}</label>
-      <input value={val || ""} onChange={e => on(e.target.value)} className={`w-full border rounded px-2 py-1 ${warn ? "border-red-300 bg-red-50" : ""}`} />
+      <label className="block text-xs uppercase tracking-wide text-slate-400 font-medium mb-1">{label}</label>
+      <input value={val || ""} onChange={e => on(e.target.value)}
+        className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none ${warn ? "border-red-300 bg-red-50 focus:border-red-400" : "border-slate-200 focus:border-teal-500"}`} />
     </div>
   );
 }
