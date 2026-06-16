@@ -1,10 +1,10 @@
-const { google } = require("googleapis");
+import { google } from "googleapis";
 
 // === Update these two tab names when a new cohort starts. Only annual edit. ===
 const SHEET_ID = "1c3x6E2CI5TJ7VILiNmmimjstfaeBVv4_Cic8YoJSzVQ";
 const TABS = ["CMD_2024 Motion", "CMD_2024 Comms"];
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   // Passcode gate: must match the ROSTER_TOKEN env var (same value as PASSCODE in the app).
   if (process.env.ROSTER_TOKEN && req.query.token !== process.env.ROSTER_TOKEN) {
     return res.status(401).json({ error: "unauthorized" });
@@ -38,7 +38,7 @@ module.exports = async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: String(e.message || e) });
   }
-};
+}
 
 const ADMIN_RE = /^\d{6}[a-z]$/i, MOBILE_RE = /^\+?\d[\d ]{6,}$/;
 const lv = c => c.href || (/^https?:\/\//i.test(c.text) ? c.text : "");
