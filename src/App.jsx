@@ -220,6 +220,7 @@ export default function App() {
       <tr>
         <td style="border:1px solid #444;padding:6px 12px;font-weight:bold;">${esc(s.name)}</td>
         <td style="border:1px solid #444;padding:6px 12px;">${esc(s.mobile)}</td>
+        <td style="border:1px solid #444;padding:6px 12px;">${esc(s.email)}</td>
         <td style="border:1px solid #444;padding:6px 12px;">${linkCell("Portfolio", s.portfolio)}</td>
         <td style="border:1px solid #444;padding:6px 12px;">${linkCell("Showreel", s.showreel)}</td>
         <td style="border:1px solid #444;padding:6px 12px;">${linkCell("Resume", s.resume)}</td>
@@ -235,7 +236,7 @@ ${label}<div>Dear ${esc(greeting)},</div><br>
 <div><b>Shawn Yeo</b><br>Senior Lecturer | School of Design and Media</div></div>`;
   }
   function buildText() {
-    const tbl = rows.map(s => `${s.name}\n  Mobile: ${s.mobile}\n  Portfolio: ${s.portfolio||"[missing]"}\n  Showreel: ${s.showreel||"[missing]"}\n  Resume: ${s.resume||"[missing]"}`).join("\n\n");
+    const tbl = rows.map(s => `${s.name}\n  Mobile: ${s.mobile}\n  Email: ${s.email}\n  Portfolio: ${s.portfolio||"[missing]"}\n  Showreel: ${s.showreel||"[missing]"}\n  Resume: ${s.resume||"[missing]"}`).join("\n\n");
     const label = includeLabel ? "Official (Closed) and Sensitive-Normal\n\n" : "";
     return `${label}Dear ${greeting},
 
