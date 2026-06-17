@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { Search, Check, Copy, X, Upload, ChevronDown, ChevronRight, Trash2, RefreshCw, Lock, Calendar } from "lucide-react";
 
 // === Set this, and set the SAME value as ROSTER_TOKEN in Vercel env vars ===
-const PASSCODE = "SCMDINTERN2026";
+const PASSCODE = "CMDINTERN2026";
 
 const STORE_KEY = "roster:v1";
 const PERIODS_KEY = "periods:v1";
