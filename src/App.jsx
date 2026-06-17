@@ -1,17 +1,43 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Search, Check, Copy, X, Upload, ChevronDown, ChevronRight, Trash2, RefreshCw, Lock } from "lucide-react";
+import { Search, Check, Copy, X, Upload, ChevronDown, ChevronRight, Trash2, RefreshCw, Lock, Calendar } from "lucide-react";
 
 // === Set this, and set the SAME value as ROSTER_TOKEN in Vercel env vars ===
-const PASSCODE = "CMDINTERN2026";
+const PASSCODE = "SCMDINTERN2026";
 
-const PERIODS = {
-  "Period 1": "Period 1 - 2 Mar - 22 May 2026",
-  "Period 2": "Period 2 - 25 May - 14 Aug 2026",
-  "Period 3": "Period 3 - 31 Aug - 20 Nov 2026",
-  "Period 4": "Period 4 - 23 Nov 2026 - 12 Feb 2027",
-};
 const STORE_KEY = "roster:v1";
+const PERIODS_KEY = "periods:v1";
 const STEPS = ["Students", "Company", "Review", "Email"];
+
+// Default period dates. These are editable in-app (Period dates panel) and persist.
+const DEFAULT_PERIODS = [
+  { label: "Period 1", start: "2 Mar 2026", end: "22 May 2026" },
+  { label: "Period 2", start: "25 May 2026", end: "14 Aug 2026" },
+  { label: "Period 3", start: "31 Aug 2026", end: "20 Nov 2026" },
+  { label: "Period 4", start: "23 Nov 2026", end: "12 Feb 2027" },
+];
+
+// storage helper: window.storage in the Claude preview, localStorage on the deployed site
+const store = {
+  async get(k) {
+    try { if (typeof window !== "undefined" && window.storage) { const r = await window.storage.get(k); return r ? r.value : null; } } catch (e) {}
+    try { return localStorage.getItem(k); } catch (e) {}
+    return null;
+  },
+  async set(k, v) {
+    try { if (typeof window !== "undefined" && window.storage) { await window.storage.set(k, v); return; } } catch (e) {}
+    try { localStorage.setItem(k, v); } catch (e) {}
+  },
+};
+
+function periodLineText(periods, idx, duration) {
+  const p = periods[idx];
+  if (!p) return "";
+  if (duration === "24") {
+    const n = periods[idx + 1];
+    if (n) return `${p.label} to ${n.label} (${p.start} to ${n.end}), 24 weeks`;
+  }
+  return `${p.label} (${p.start} to ${p.end}), ${duration} weeks`;
+}
 
 function ordinal(n) {
   const v = n % 100;
@@ -90,16 +116,20 @@ export default function App() {
   const [roster, setRoster] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showPeriods, setShowPeriods] = useState(false);
   const [append, setAppend] = useState(false);
   const [importNote, setImportNote] = useState("");
   const dropRef = useRef(null);
+
+  const [periods, setPeriods] = useState(DEFAULT_PERIODS);
+  const [periodIdx, setPeriodIdx] = useState(2);
+  const [duration, setDuration] = useState("12");
 
   const [step, setStep] = useState(0);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState([]);
   const [contact, setContact] = useState("");
   const [company, setCompany] = useState("");
-  const [period, setPeriod] = useState("Period 3");
   const [deadline, setDeadline] = useState("");
   const [includeLabel, setIncludeLabel] = useState(true);
   const [copied, setCopied] = useState("");
@@ -111,21 +141,27 @@ export default function App() {
       if (r.ok) { const data = await r.json(); if (Array.isArray(data) && data.length) { setRoster(data); got = true; } }
     } catch (e) {}
     if (!got) {
-      try { const res = await window.storage.get(STORE_KEY); if (res && res.value) setRoster(JSON.parse(res.value)); } catch (e) {}
+      try { const v = await store.get(STORE_KEY); if (v) setRoster(JSON.parse(v)); } catch (e) {}
     }
     setLoaded(true);
   }
-  useEffect(() => { if (unlocked) loadRoster(token); }, [unlocked]);
+  async function loadPeriods() {
+    try { const v = await store.get(PERIODS_KEY); if (v) setPeriods(JSON.parse(v)); } catch (e) {}
+  }
+  useEffect(() => { if (unlocked) { loadRoster(token); loadPeriods(); } }, [unlocked]);
   useEffect(() => { if (loaded && roster.length === 0) setShowImport(true); }, [loaded]);
 
   function submitCode() {
     if (codeInput.trim() === PASSCODE) { setToken(codeInput.trim()); setAuthError(""); setUnlocked(true); }
     else setAuthError("Incorrect passcode.");
   }
-  async function persist(next) {
-    setRoster(next);
-    try { await window.storage.set(STORE_KEY, JSON.stringify(next)); } catch (e) {}
+  async function persist(next) { setRoster(next); store.set(STORE_KEY, JSON.stringify(next)); }
+  function updatePeriod(i, field, val) {
+    const next = periods.map((p, idx) => idx === i ? { ...p, [field]: val } : p);
+    setPeriods(next);
+    store.set(PERIODS_KEY, JSON.stringify(next));
   }
+
   async function syncFromSheets() {
     setImportNote("Syncing from Google Sheets...");
     try {
@@ -145,7 +181,8 @@ export default function App() {
     e.preventDefault();
     const html = e.clipboardData.getData("text/html");
     const text = e.clipboardData.getData("text/plain");
-    const parsed = (html ? parseHtmlTable(html) : parseTsv(text)) ? buildRoster(html ? parseHtmlTable(html) : parseTsv(text)) : [];
+    const parsedRows = html ? parseHtmlTable(html) : parseTsv(text);
+    const parsed = parsedRows ? buildRoster(parsedRows) : [];
     if (!parsed.length) { setImportNote("Could not read any rows. Copy the student rows (including the header) and paste again."); return; }
     let next;
     if (append) {
@@ -171,7 +208,7 @@ export default function App() {
   function toggle(key) { setSelected(sel => sel.includes(key) ? sel.filter(k => k !== key) : [...sel, key]); }
 
   const rows = selected.map(k => roster.find(s => keyOf(s) === k)).filter(Boolean);
-  const periodText = PERIODS[period];
+  const periodLine = periodLineText(periods, periodIdx, duration);
   const deadlineText = fmtDeadline(deadline);
   const greeting = contact.trim() || "[Contact]";
 
@@ -191,7 +228,7 @@ export default function App() {
     return `<div style="font-family:Calibri,Arial,sans-serif;font-size:14px;color:#222;">
 ${label}<div>Dear ${esc(greeting)},</div><br>
 <div>Thanks for supporting our Internship Programme for CMD students.</div><br>
-<div>We&rsquo;re assigning the following student/s for <b>${esc(periodText)}</b>.</div><br>
+<div>We&rsquo;re assigning the following student/s for <b>${esc(periodLine)}</b>.</div><br>
 <table style="border-collapse:collapse;">${trs}</table><br>
 <div>Do have a quick chat with the allocated intern/s to share the company&rsquo;s workflow, set expectations, and clear questions.</div><br>
 <div>Please confirm the placement by <b>${esc(deadlineText)}</b> so we can finalise the allocation, thank you.</div><br>
@@ -204,7 +241,7 @@ ${label}<div>Dear ${esc(greeting)},</div><br>
 
 Thanks for supporting our Internship Programme for CMD students.
 
-We're assigning the following student/s for ${periodText}.
+We're assigning the following student/s for ${periodLine}.
 
 ${tbl}
 
@@ -256,15 +293,36 @@ Senior Lecturer | School of Design and Media`;
   return (
     <div className="min-h-screen bg-teal-50 py-8 px-4">
       <div className="max-w-4xl mx-auto">
-        <div className="flex items-center justify-between mb-4 px-1">
+        <div className="flex items-center justify-between mb-4 px-1 gap-2 flex-wrap">
           <div>
             <h1 className="text-lg font-semibold text-slate-800">Intern Placement</h1>
             <p className="text-xs text-slate-400">{roster.length} students loaded</p>
           </div>
-          <button onClick={() => setShowImport(v => !v)} className="flex items-center gap-1.5 text-sm text-teal-700 border border-teal-200 bg-white rounded-full px-4 py-2 hover:bg-teal-50">
-            <Upload size={15}/> Manage roster {showImport ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => { setShowPeriods(false); setShowImport(v => !v); }} className="flex items-center gap-1.5 text-sm text-teal-700 border border-teal-200 bg-white rounded-full px-4 py-2 hover:bg-teal-50">
+              <Upload size={15}/> Manage roster
+            </button>
+            <button onClick={() => { setShowImport(false); setShowPeriods(v => !v); }} className="flex items-center gap-1.5 text-sm text-teal-700 border border-teal-200 bg-white rounded-full px-4 py-2 hover:bg-teal-50">
+              <Calendar size={15}/> Period dates
+            </button>
+          </div>
         </div>
+
+        {showPeriods && (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 mb-4">
+            <p className={labelCls}>Period dates</p>
+            <p className="text-xs text-slate-400 mb-3">Update these once a year. Every email uses them automatically. Type dates plainly, for example 2 Mar 2026.</p>
+            <div className="space-y-2">
+              {periods.map((p, i) => (
+                <div key={i} className="grid grid-cols-1 md:grid-cols-3 gap-2 md:items-center">
+                  <div className="text-sm font-medium text-slate-600">{p.label}</div>
+                  <input value={p.start} onChange={e => updatePeriod(i,"start",e.target.value)} placeholder="Start, e.g. 2 Mar 2026" className={inputCls}/>
+                  <input value={p.end} onChange={e => updatePeriod(i,"end",e.target.value)} placeholder="End, e.g. 22 May 2026" className={inputCls}/>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {showImport && (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 mb-4 space-y-3">
@@ -287,7 +345,6 @@ Senior Lecturer | School of Design and Media`;
         )}
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row overflow-hidden">
-          {/* Stepper */}
           <div className="md:w-56 shrink-0 bg-slate-50 p-6 border-b md:border-b-0 md:border-r border-slate-100">
             <div className="flex md:flex-col gap-1">
               {STEPS.map((s, i) => {
@@ -296,7 +353,7 @@ Senior Lecturer | School of Design and Media`;
                   <div key={s} className="flex md:items-start items-center gap-3 flex-1 md:flex-none">
                     <div className="flex md:flex-col items-center">
                       <button onClick={() => setStep(i)}
-                        className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium shrink-0 ${active ? "bg-teal-600 text-white" : done ? "bg-teal-600 text-white" : "bg-slate-200 text-slate-500"}`}>
+                        className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium shrink-0 ${active || done ? "bg-teal-600 text-white" : "bg-slate-200 text-slate-500"}`}>
                         {done ? <Check size={14}/> : i + 1}
                       </button>
                       {i < STEPS.length - 1 && <div className={`hidden md:block w-px h-7 my-1 ${done ? "bg-teal-500" : "bg-slate-200"}`} />}
@@ -308,7 +365,6 @@ Senior Lecturer | School of Design and Media`;
             </div>
           </div>
 
-          {/* Content */}
           <div className="flex-1 p-6 flex flex-col" style={{ minHeight: "440px" }}>
             {roster.length === 0 ? (
               <div className="flex-1 flex items-center justify-center text-center text-slate-400 text-sm">
@@ -349,9 +405,17 @@ Senior Lecturer | School of Design and Media`;
                         <div><label className={labelCls}>Company</label><input value={company} onChange={e => setCompany(e.target.value)} placeholder="e.g. Rewind Networks" className={inputCls} /></div>
                         <div><label className={labelCls}>Contact name</label><input value={contact} onChange={e => setContact(e.target.value)} placeholder="e.g. Kif" className={inputCls} /></div>
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div><label className={labelCls}>Period</label>
-                          <select value={period} onChange={e => setPeriod(e.target.value)} className={inputCls}>{Object.keys(PERIODS).map(p => <option key={p}>{p}</option>)}</select>
+                          <select value={periodIdx} onChange={e => setPeriodIdx(Number(e.target.value))} className={inputCls}>
+                            {periods.map((p, i) => <option key={i} value={i}>{p.label} ({p.start} - {p.end})</option>)}
+                          </select>
+                        </div>
+                        <div><label className={labelCls}>Duration</label>
+                          <select value={duration} onChange={e => setDuration(e.target.value)} className={inputCls}>
+                            <option value="12">12 weeks (one period)</option>
+                            <option value="24">24 weeks (this period + next)</option>
+                          </select>
                         </div>
                         <div><label className={labelCls}>Confirm-by date</label><input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} className={inputCls} /></div>
                       </div>
@@ -359,7 +423,10 @@ Senior Lecturer | School of Design and Media`;
                         <input type="checkbox" checked={includeLabel} onChange={e => setIncludeLabel(e.target.checked)} />
                         Include "Official (Closed) and Sensitive-Normal" line
                       </label>
-                      {company && <div className="text-xs text-slate-400 border-t border-slate-100 pt-3">Suggested subject: <span className="text-slate-600">CMD Internship Placement – {company} – {period}</span></div>}
+                      <div className="text-xs text-slate-400 border-t border-slate-100 pt-3">
+                        The email will read: <span className="text-slate-600">{periodLine}</span>
+                        {company && <div className="mt-1">Suggested subject: <span className="text-slate-600">CMD Internship Placement – {company} – {periods[periodIdx].label} ({duration} weeks)</span></div>}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -375,7 +442,7 @@ Senior Lecturer | School of Design and Media`;
                         {rows.map(s => {
                           const k = keyOf(s);
                           return (
-                            <div key={k} className="border border-slate-150 rounded-xl p-4">
+                            <div key={k} className="border border-slate-200 rounded-xl p-4">
                               <div className="flex items-center justify-between mb-2">
                                 <div className="font-medium text-slate-700 text-sm">{s.name} <span className="text-slate-400 text-xs">{s.admin}</span></div>
                                 <button onClick={() => toggle(k)} className="text-slate-300 hover:text-red-500"><X size={16}/></button>
@@ -404,13 +471,12 @@ Senior Lecturer | School of Design and Media`;
                     ) : (
                       <>
                         {missingLinks && <p className="text-xs text-red-500 mb-2">Some links are missing. Add them in step 3, or fix the Sheet and re-sync.</p>}
-                        <div className="border border-slate-150 rounded-xl p-4 bg-slate-50 max-h-96 overflow-y-auto" dangerouslySetInnerHTML={{ __html: buildHtml() }} />
+                        <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 max-h-96 overflow-y-auto" dangerouslySetInnerHTML={{ __html: buildHtml() }} />
                       </>
                     )}
                   </div>
                 )}
 
-                {/* Nav */}
                 <div className="mt-auto pt-6 flex items-center justify-between">
                   <button onClick={() => setStep(s => Math.max(0, s - 1))} disabled={step === 0}
                     className={`text-sm px-5 py-2.5 rounded-full ${step === 0 ? "text-slate-300" : "text-slate-600 hover:bg-slate-100"}`}>Back</button>
